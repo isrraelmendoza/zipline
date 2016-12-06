@@ -65,7 +65,8 @@ from zipline.utils.input_validation import (
     expect_element,
     verify_indices_all_unique,
 )
-from zipline.utils.sqlite_utils import group_into_chunks, coerce_string_to_conn
+from zipline.utils.sqlite_utils import group_into_chunks, coerce_string_to_conn, \
+    coerce_string_to_eng
 from zipline.utils.memoize import lazyval
 from zipline.utils.cli import maybe_show_progress
 from ._equities import _compute_row_slices, _read_bcolz_data
@@ -1239,7 +1240,7 @@ class SQLiteAdjustmentReader(object):
 
     Parameters
     ----------
-    conn : str or sqlite3.Connection
+    conn : str or sa.Engine
         Connection from which to load data.
 
     See Also
@@ -1247,9 +1248,15 @@ class SQLiteAdjustmentReader(object):
     :class:`zipline.data.us_equity_pricing.SQLiteAdjustmentWriter`
     """
 
-    @preprocess(conn=coerce_string_to_conn)
-    def __init__(self, conn):
-        self.conn = conn
+    @preprocess(eng=coerce_string_to_eng)
+    def __init__(self, eng):
+        self.sa_conn = eng.connect()
+        # Several methods expect the underlying SQLite3 connection.
+        self.conn = self.sa_conn.connection.connection
+
+    @classmethod
+    def creating_sa_engine(cls, conn):
+        return
 
     def load_adjustments(self, columns, dates, assets):
         return load_adjustments_from_sqlite(
@@ -1347,8 +1354,9 @@ class SQLiteAdjustmentReader(object):
             # Dates are stored in second resolution as ints in adj.db tables.
             return read_sql_table(
                 table_name,
-                self.conn,
-                parse_dates={col: 's' for col in date_cols}
+                self.sa_conn,
+                parse_dates={col: 's' for col in date_cols},
+                index_col='index'
             )
 
         return {t_name: _get_df_from_table(t_name, KNOWN_DATE_COLS[t_name])
